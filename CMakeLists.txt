@@ -13,7 +13,6 @@ find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(GeographicLib REQUIRED)
 find_package (Boost REQUIRED COMPONENTS system filesystem thread chrono date_time atomic serialization regex timer)
-include_directories(SYSTEM ${Boost_LIBRARY_DIRS})
 find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -21,6 +20,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(a2rl_bs_msgs REQUIRED)
+find_package(vectornav_msgs REQUIRED)
 #find_package(cmake_modules REQUIRED)
 # include_directories(include ${catkin_INCLUDE_DIRS})
 # include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
@@ -45,19 +45,18 @@ add_library(${PROJECT_NAME} SHARED)
 
 #=====================================================
 
-
 ament_target_dependencies(${PROJECT_NAME} PUBLIC
     "rclcpp"
     "std_msgs"
     "a2rl_bs_msgs"
-    "tf2" 
-    "tf2_ros" 
-    "tf2_geometry_msgs" 
-    "pcl_conversions" 
-    "PCL" 
+    # "tf2" 
+    # "tf2_ros" 
+    # "tf2_geometry_msgs" 
+    # "pcl_conversions" 
+    # "PCL" 
     "sensor_msgs" 
     "geometry_msgs"
-    "gtsam"
+    "vectornav_msgs"
 )
 
 target_sources(${PROJECT_NAME}
@@ -77,12 +76,15 @@ target_include_directories(${PROJECT_NAME}
 set(INCLUDE_DIRS include 
 ${ament_cmake_INCLUDE_DIRS} 
 ${rclcpp_INCLUDE_DIRS}
-${pcl_ros_INCLUDE_DIRS} 
-${pcl_conversions_INCLUDE_DIRS}
+# ${pcl_ros_INCLUDE_DIRS} 
+# ${pcl_conversions_INCLUDE_DIRS}
+${EIGEN3_INCLUDE_DIR}
 ${std_msgs_INCLUDE_DIRS}
 ${sensor_msgs_INCLUDE_DIRS}
 ${rclcpp_components_INCLUDE_DIRS}
 ${GTSAM_INCLUDE_DIRS}
+${GeographicLib_INCLUDE_DIRS}
+${Boost_LIBRARY_DIRS}
 )
 # Include
 include_directories(${INCLUDE_DIRS})
@@ -90,8 +92,8 @@ include_directories(${INCLUDE_DIRS})
 set(LIBRARY_DIRS 
 ${ament_cmake_LIBRARY_DIRS} 
 ${rclcpp_LIBRARY_DIRS}
-${pcl_ros_LIBRARY_DIRS} 
-${pcl_conversions_LIBRARY_DIRS}
+# ${pcl_ros_LIBRARY_DIRS} 
+# ${pcl_conversions_LIBRARY_DIRS}
 ${std_msgs_LIBRARY_DIRS}
 ${sensor_msgs_LIBRARY_DIRS}
 ${rclcpp_components_LIBRARY_DIRS})
@@ -101,15 +103,17 @@ link_directories(${LIBRARY_DIRS})
 set(LIBS 
 ${ament_cmake_LIBRARIES} 
 ${rclcpp_LIBRARIES} 
-${pcl_ros_LIBRARIES} 
-${pcl_conversions_LIBRARIES} 
+# ${pcl_ros_LIBRARIES} 
+# ${pcl_conversions_LIBRARIES} 
 ${std_msgs_LIBRARIES} 
 ${sensor_msgs_LIBRARIES}
 ${rclcpp_components_LIBRARIES})
 
 
-add_executable(StateEstimator StateEstimatorNode.cpp)
-target_link_libraries(StateEstimator ${LIBS} ${PCL_LIBRARIES} ${PROJECT_NAME} ${OpenCV_LIBRARIES} )
+add_executable(StateEstimator_exec src/StateEstimatorNode.cpp)
+target_link_libraries(StateEstimator_exec ${LIBS} 
+# ${PCL_LIBRARIES} 
+${PROJECT_NAME} ${GeographicLib_LIBRARIES} gtsam ${TBB_LIBRARIES} ${Boost_LIBRARY_DIRS})
 
 install(TARGETS
 ${PROJECT_NAME}
@@ -119,7 +123,7 @@ RUNTIME DESTINATION bin
 )
 
 # ==== Install ====
-install(TARGETS StateEstimator 
+install(TARGETS StateEstimator_exec 
 ARCHIVE
 LIBRARY
 RUNTIME
@@ -132,8 +136,8 @@ install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 
 ament_export_dependencies(ament_cmake)
 ament_export_dependencies(rclcpp)
-ament_export_dependencies(pcl_ros)
-ament_export_dependencies(pcl_conversions)
+# ament_export_dependencies(pcl_ros)
+# ament_export_dependencies(pcl_conversions)
 ament_export_dependencies(std_msgs)
 ament_export_dependencies(sensor_msgs)
 ament_export_include_directories(${INCLUDE_DIRS})

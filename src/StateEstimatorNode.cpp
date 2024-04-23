@@ -3,8 +3,8 @@
 
 int main (int argc, char** argv)
 {
-  ros::init(argc, argv, "StateEstimator");
-  //ros::NodeHandle n;
-  autorally_core::StateEstimator wpt;
-  ros::spin();
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<StateEstimator::StateEstimatorNode>());
+  rclcpp::shutdown();
+  return 0;
 }

@@ -211,18 +211,20 @@ namespace StateEstimator
 
     optimizedTime_ = 0;
 
-    imu_3dm_gx4::FilterOutputConstPtr ip;
+    //TODO: we need to have a better intialization
+    std::shared_ptr<vectornav_msgs::msg::ImuGroup> ip = nullptr;
     if (!fixedInitialPose)
     {
       while (!ip)
       {
-        ROS_WARN("Waiting for valid initial orientation");
-        ip = ros::topic::waitForMessage<imu_3dm_gx4::FilterOutput>("filter", nh_, ros::Duration(15));
+        RCLCPP_WARN(this->get_logger(),"Waiting for valid initial orientation ...");
+        ip = rclcpp::wait_for_message<vectornav_msgs::msg::ImuGroup>("/vectornav/raw/imu", this, std::chrono::seconds(5));
       }
-      initialPose_.orientation.w = ip->orientation.w;
-      initialPose_.orientation.x = ip->orientation.x;
-      initialPose_.orientation.y = ip->orientation.y;
-      initialPose_.orientation.z = ip->orientation.z;
+      Rot3 initialRotation = Rot3::Ypr(ip->angularrate.z, ip->angularrate.y, ip->angularrate.x);
+      initialPose_.orientation.w = initialRotation.quaternion()[0];
+      initialPose_.orientation.x = initialRotation.quaternion()[1];
+      initialPose_.orientation.y = initialRotation.quaternion()[2];
+      initialPose_.orientation.z = initialRotation.quaternion()[3];
       initialPose_.bias.x = ip->bias.x;
       initialPose_.bias.y = ip->bias.y;
       initialPose_.bias.z = ip->bias.z;
@@ -250,12 +252,12 @@ namespace StateEstimator
     bodyPSensor_.print("Body pose\n");
     carENUPcarNED_.print("CarBodyPose\n");
 
-    posePub_ = nh_.advertise<nav_msgs::Odometry>("pose", 1);
-    biasAccPub_ = nh_.advertise<geometry_msgs::Point>("bias_acc", 1);
-    biasGyroPub_ = nh_.advertise<geometry_msgs::Point>("bias_gyro", 1);
-    timePub_ = nh_.advertise<geometry_msgs::Point>("time_delays", 1);
-    statusPub_ = nh_.advertise<autorally_msgs::stateEstimatorStatus>("status", 1);
-    gpsPosPub_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("gps_pos", 1);
+    posePub_ = this->create_publisher<nav_msgs::msg::Odometry>("/pose", 1);
+    biasAccPub_ = this->create_publisher<geometry_msgs::msg::Point>("/bias_acc", 1);
+    biasGyroPub_ = this->create_publisher<geometry_msgs::msg::Point>("/bias_gyro", 1);
+    timePub_ = this->create_publisher<geometry_msgs::msg::Point>("/time_delays", 1);
+    // statusPub_ = this->create_publisher<autorally_msgs::msg::StateEstimatorStatus>("status", 1);
+    gpsPosPub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/gps_pose", 1);
 
     ISAM2Params params;
     params.factorization = ISAM2Params::QR;
@@ -267,11 +269,11 @@ namespace StateEstimator
              gpsSigma_, gpsSigma_, gpsSigma_).finished());
 
      // Add velocity prior
-     priorNoiseVel_ = noiseModel::Diagonal::Sigmas(
+    priorNoiseVel_ = noiseModel::Diagonal::Sigmas(
          (Vector(3) << initialVelNoise, initialVelNoise, initialVelNoise).finished());
 
      // Add bias prior
-     priorNoiseBias_ = noiseModel::Diagonal::Sigmas(
+    priorNoiseBias_ = noiseModel::Diagonal::Sigmas(
          (Vector(6) << initialBiasNoiseAcc,
              initialBiasNoiseAcc,
              initialBiasNoiseAcc,
@@ -279,16 +281,21 @@ namespace StateEstimator
              initialBiasNoiseGyro,
              initialBiasNoiseGyro).finished());
 
-     std::cout<<"checkpoint"<<std::endl;
+    std::cout<<"checkpoint"<<std::endl;
 
-     Vector sigma_acc_bias_c(3), sigma_gyro_bias_c(3);
-     sigma_acc_bias_c << accelBiasSigma_,  accelBiasSigma_,  accelBiasSigma_;
-     sigma_gyro_bias_c << gyroBiasSigma_, gyroBiasSigma_, gyroBiasSigma_;
-     noiseModelBetweenBias_sigma_ = (Vector(6) << sigma_acc_bias_c, sigma_gyro_bias_c).finished();
+    Vector sigma_acc_bias_c(3), sigma_gyro_bias_c(3);
+    sigma_acc_bias_c << accelBiasSigma_,  accelBiasSigma_,  accelBiasSigma_;
+    sigma_gyro_bias_c << gyroBiasSigma_, gyroBiasSigma_, gyroBiasSigma_;
+    noiseModelBetweenBias_sigma_ = (Vector(6) << sigma_acc_bias_c, sigma_gyro_bias_c).finished();
 
-     gpsSub_ = nh_.subscribe("gps", 300, &StateEstimatorNode::GpsCallback, this);
-     imuSub_ = nh_.subscribe("imu", 600, &StateEstimatorNode::ImuCallback, this);
-     odomSub_ = nh_.subscribe("wheel_odom", 300, &StateEstimatorNode::WheelOdomCallback, this);
+    gpsSub_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
+            "gps", 300, std::bind(&StateEstimatorNode::GpsCallback, this, std::placeholders::_1));
+
+    imuSub_ = this->create_subscription<sensor_msgs::msg::Imu>(
+            "imu", 600, std::bind(&StateEstimatorNode::ImuCallback, this, std::placeholders::_1));
+
+    odomSub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            "wheel_odom", 300, std::bind(&StateEstimatorNode::WheelOdomCallback, this, std::placeholders::_1));
 
      boost::thread optimizer(&StateEstimatorNode::GpsHelper,this);
   }
@@ -299,7 +306,7 @@ namespace StateEstimator
   void StateEstimatorNode::GpsCallback(sensor_msgs::NavSatFixConstPtr fix)
   {
     if (!gpsOptQ_.pushNonBlocking(fix))
-      ROS_WARN("Dropping a GPS measurement due to full queue!!");
+      RCLCPP_WARN(this->get_logger(), "Dropping a GPS measurement due to full queue!!");
   }
 
   void StateEstimatorNode::GetAccGyro(sensor_msgs::ImuConstPtr imu, Vector3 &acc, Vector3 &gyro)
@@ -327,7 +334,7 @@ namespace StateEstimator
 
   void StateEstimatorNode::GpsHelper()
   {
-    ros::Rate loop_rate(10);
+    RCLCPP::Rate loop_rate(10);
     bool gotFirstFix = false;
     double startTime;
     int odomKey = 1;
@@ -339,7 +346,7 @@ namespace StateEstimator
     unsigned char status = autorally_msgs::stateEstimatorStatus::OK;
 
 
-    while (ros::ok())
+    while (RCLCPP::ok())
     {
       bool optimize = false;
 
@@ -348,13 +355,13 @@ namespace StateEstimator
         sensor_msgs::NavSatFixConstPtr fix = gpsOptQ_.popBlocking();
         startTime = TIME(fix);
         if(imuOptQ_.size() <= 0) {
-          ROS_WARN_THROTTLE(1, "no IMU messages before first fix, continuing until there is");
+          RCLCPP_WARN_THROTTLE(1, "no IMU messages before first fix, continuing until there is");
           continue;
         }
         // errors out if the IMU and GPS are not close in timestamps
         double most_recent_imu_time = imuOptQ_.back()->header.stamp.toSec();
         if(std::abs(most_recent_imu_time - startTime) > 0.1) {
-          ROS_ERROR_STREAM("There is a very large difference in the GPS and IMU timestamps " << most_recent_imu_time - startTime);
+          RCLCPP_ERROR_STREAM(this->get_logger(), "There is a very large difference in the GPS and IMU timestamps " << most_recent_imu_time - startTime);
           exit(-1);
         }
 
@@ -485,7 +492,7 @@ namespace StateEstimator
             if (dist < maxGPSError_ || latestGPSKey < imuKey-2)
             {
               geometry_msgs::PoseWithCovarianceStamped point;
-              point.header.stamp = ros::Time::now();
+              point.header.stamp = rclcpp::Clock(RCL_ROS_TIME).now();//TODO: use now or bag time?
               point.header.frame_id = "odom";
               point.pose.pose.position.x = E;
               point.pose.pose.position.y = N;
@@ -505,8 +512,7 @@ namespace StateEstimator
             }
             else
             {
-              ROS_WARN("Received bad GPS message");
-              diag_warn("Received bad GPS message");
+              RCLCPP_WARN(this->get_logger(), "Received bad GPS message");
             }
           }
         }
@@ -542,12 +548,10 @@ namespace StateEstimator
             if (latestGPSKey + 3 < imuKey)
             {
               status = autorally_msgs::stateEstimatorStatus::WARN;
-              diag_warn("No gps");
             }
             else
             {
               status = autorally_msgs::stateEstimatorStatus::OK;
-              diag_ok("Still ok!");
             }
 
             double curTime = startTime + (imuKey-1) * 0.1;
@@ -561,7 +565,7 @@ namespace StateEstimator
             }
 
             nav_msgs::Odometry poseNew;
-            poseNew.header.stamp = ros::Time(curTime);
+            poseNew.header.stamp = RCLCPP::Time(curTime);//TODO
 
             geometry_msgs::Point ptAcc;
             ptAcc.x = prevBias.vector()[0];
@@ -578,8 +582,7 @@ namespace StateEstimator
           }
           catch(gtsam::IndeterminantLinearSystemException ex)
           {
-            ROS_ERROR("Encountered Indeterminant System Error!");
-            diag_error("State estimator has encountered indeterminant system error");
+            RCLCPP_ERROR(this->get_logger(), "Encountered Indeterminant System Error!");
             status = autorally_msgs::stateEstimatorStatus::ERROR;
             {
               boost::mutex::scoped_lock guard(optimizedStateMutex_);
@@ -607,7 +610,7 @@ namespace StateEstimator
     if (qSize > maxQSize_)
       maxQSize_ = qSize;
     if (!imuOptQ_.pushNonBlocking(imu))
-      ROS_WARN("Dropping an IMU measurement due to full queue!!");
+      RCLCPP_WARN(this->get_logger(), "Dropping an IMU measurement due to full queue!!");
 
     // Each time we get an imu measurement, calculate the incremental pose from the last GTSAM pose
     imuMeasurements_.push_back(imu);
@@ -691,7 +694,7 @@ namespace StateEstimator
 
     geometry_msgs::Point delays;
     delays.x = TIME(imu);
-    delays.y = (ros::Time::now() - imu->header.stamp).toSec();
+    delays.y = (rclcpp::Clock(RCL_ROS_TIME).now(); - imu->header.stamp).toSec();//TODO
     delays.z = TIME(imu) - optimizedTime;
     timePub_.publish(delays);
 
@@ -706,7 +709,7 @@ namespace StateEstimator
   void StateEstimatorNode::WheelOdomCallback(nav_msgs::OdometryConstPtr odom)
   {
     if (!odomOptQ_.pushNonBlocking(odom) && usingOdom_) {
-      ROS_WARN("Dropping an wheel odometry measurement due to full queue!!");
+      RCLCPP_WARN(this->get_logger(), "Dropping an wheel odometry measurement due to full queue!!");
     }
   }
 
@@ -745,12 +748,6 @@ namespace StateEstimator
     Pose3 betweenPose = Pose3(Rot3::Rz(theta), Point3(x, y, 0.0));
     return BetweenFactor<Pose3>(X(curKey-1), X(curKey), betweenPose, noiseModel::Diagonal::Sigmas(
           (Vector(6) << thetaVariance*2,thetaVariance*2,thetaVariance,xVar,yVar,zVar).finished()));
-  }
-
-  void StateEstimatorNode::diagnosticStatus(const ros::TimerEvent& /*time*/)
-  {
-    //Don't do anything
-    //diag_info("Test");
   }
 
 };

@@ -57,13 +57,10 @@
 #include "std_msgs/msg/float64.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
+#include "vectornav_msgs/msg/ImuGroup.hpp"
 
-#include "StateEstimator/Diagnostics.hpp"
 #include "StateEstimator/BlockingQueue.hpp"
 
-
-
-#include "imu_3dm_gx4/msg/filter_output.hpp" //TODO: is this the real name?
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/point.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
@@ -73,18 +70,35 @@
 
 
 namespace StateEstimator
-{
+{   
+    struct Orientation_{
+        double w{0};
+        double x{0};
+        double y{0};
+        double z{0};
+    };
+    struct Bias_{
+        double x{0};
+        double y{0};
+        double z{0};
+    };
+    struct IMU_state_ {
+        Orientation_ orientation;
+        Bias_ bias;
+    };
+
+
   class StateEstimatorNode : public rclcpp::Node
   {
   private:
-    rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr gpsSub_;
-    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imuSub_;
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr posePub_;
-    rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr biasAccPub_;
-    rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr biasGyroPub_;
-    rclcpp::Publisher<std_msgs::msg::Time>::SharedPtr timePub_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr statusPub_;
+    rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr gpsSub_;//gps/fix
+    rclcpp::Subscription<vectornav_msgs::msg::ImuGroup>::SharedPtr imuSub_;///vectornav/raw/imu
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub_;//dont care
+    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr posePub_;
+    rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr biasAccPub_;
+    rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr biasGyroPub_;
+    rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr timePub_;
+    // rclcpp::Publisher<std_msgs::msg::String>::SharedPtr statusPub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr gpsPosPub_;
 
 
@@ -95,7 +109,8 @@ namespace StateEstimator
     int maxQSize_;
 
     BlockingQueue<sensor_msgs::NavSatFixConstPtr> gpsOptQ_;
-    BlockingQueue<sensor_msgs::ImuConstPtr> imuOptQ_;
+    //BlockingQueue<sensor_msgs::ImuConstPtr> imuOptQ_;
+    BlockingQueue<std::shared_ptr<vectornav_msgs::msg::ImuGroup>> imuOptQ_;
     BlockingQueue<nav_msgs::OdometryConstPtr> odomOptQ_;
 
     boost::mutex optimizedStateMutex_;
@@ -104,11 +119,12 @@ namespace StateEstimator
     boost::shared_ptr<gtsam::PreintegratedImuMeasurements> imuPredictor_;
     double imuDt_;
     gtsam::imuBias::ConstantBias optimizedBias_, previousBias_;
-    sensor_msgs::ImuConstPtr lastIMU_;
+    //sensor_msgs::ImuConstPtr lastIMU_;
+    std::shared_ptr<vectornav_msgs::msg::ImuGroup> lastIMU_;
     boost::shared_ptr<gtsam::PreintegrationParams> preintegrationParams_;
 
-    std::list<sensor_msgs::ImuConstPtr> imuMeasurements_, imuGrav_;
-    imu_3dm_gx4::FilterOutput initialPose_;
+    std::list<std::shared_ptr<vectornav_msgs::msg::ImuGroup>> imuMeasurements_, imuGrav_;
+    IMU_state_ initialPose_;//TODO
     gtsam::Pose3 bodyPSensor_, carENUPcarNED_;
     gtsam::Pose3 imuPgps_;
 
