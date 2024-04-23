@@ -54,10 +54,11 @@
 #include <queue>
 
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float64.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
-#include "vectornav_msgs/msg/ImuGroup.hpp"
+#include "vectornav_msgs/msg/imu_group.hpp"
 
 #include "StateEstimator/BlockingQueue.hpp"
 
@@ -103,25 +104,25 @@ namespace StateEstimator
 
 
     double lastImuT_, lastImuTgps_;
-    unsigned char status_;
+    //unsigned char status_;
     double accelBiasSigma_, gyroBiasSigma_;
     double gpsSigma_;
     int maxQSize_;
 
-    BlockingQueue<sensor_msgs::NavSatFixConstPtr> gpsOptQ_;
+    BlockingQueue<sensor_msgs::msg::NavSatFix::ConstPtr> gpsOptQ_;
     //BlockingQueue<sensor_msgs::ImuConstPtr> imuOptQ_;
     BlockingQueue<std::shared_ptr<vectornav_msgs::msg::ImuGroup>> imuOptQ_;
-    BlockingQueue<nav_msgs::OdometryConstPtr> odomOptQ_;
+    BlockingQueue<nav_msgs::msg::Odometry::ConstPtr> odomOptQ_;
 
-    boost::mutex optimizedStateMutex_;
+    std::mutex optimizedStateMutex_;
     gtsam::NavState optimizedState_;
     double optimizedTime_;
-    boost::shared_ptr<gtsam::PreintegratedImuMeasurements> imuPredictor_;
+    std::shared_ptr<gtsam::PreintegratedImuMeasurements> imuPredictor_;
     double imuDt_;
     gtsam::imuBias::ConstantBias optimizedBias_, previousBias_;
     //sensor_msgs::ImuConstPtr lastIMU_;
-    std::shared_ptr<vectornav_msgs::msg::ImuGroup> lastIMU_;
-    boost::shared_ptr<gtsam::PreintegrationParams> preintegrationParams_;
+    vectornav_msgs::msg::ImuGroup::SharedPtr lastIMU_;
+    std::shared_ptr<gtsam::PreintegrationParams> preintegrationParams_;
 
     std::list<std::shared_ptr<vectornav_msgs::msg::ImuGroup>> imuMeasurements_, imuGrav_;
     IMU_state_ initialPose_;//TODO
@@ -129,7 +130,7 @@ namespace StateEstimator
     gtsam::Pose3 imuPgps_;
 
     bool fixedOrigin_;
-    GeographicLib::LocalCartesian enu_;   /// Object to put lat/lon coordinates into local cartesian
+    GeographicLib::LocalCartesian enu_;// Object to put lat/lon coordinates into local cartesian
     bool gotFirstFix_;
     bool invertx_, inverty_, invertz_;
     bool usingOdom_;
@@ -141,18 +142,19 @@ namespace StateEstimator
     gtsam::Vector noiseModelBetweenBias_sigma_;
     gtsam::ISAM2 *isam_;
 
-    nav_msgs::OdometryConstPtr lastOdom_;
+    nav_msgs::msg::Odometry::ConstPtr lastOdom_;
 
   public:
     StateEstimatorNode();
     ~StateEstimatorNode();
-    void GpsCallback(sensor_msgs::NavSatFixConstPtr fix);
-    void ImuCallback(sensor_msgs::ImuConstPtr imu);
-    void WheelOdomCallback(nav_msgs::OdometryConstPtr odom);
+    void GpsCallback(sensor_msgs::msg::NavSatFix::ConstPtr fix);
+    void ImuCallback(vectornav_msgs::msg::ImuGroup::SharedPtr imu);
+    void WheelOdomCallback(nav_msgs::msg::Odometry::ConstPtr odom);
     void GpsHelper();
     gtsam::BetweenFactor<gtsam::Pose3> integrateWheelOdom(double prevTime, double stopTime, int curFactor);
-    void GetAccGyro(sensor_msgs::ImuConstPtr imu, gtsam::Vector3 &acc, gtsam::Vector3 &gyro);
+    void GetAccGyro(vectornav_msgs::msg::ImuGroup::ConstPtr imu, gtsam::Vector3 &acc, gtsam::Vector3 &gyro);
   };
+  builtin_interfaces::msg::Time toBuiltinTime(const rclcpp::Time& rclcpp_time);
 };
 
 #endif /* StateEstimator_H_ */

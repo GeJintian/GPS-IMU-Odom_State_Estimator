@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <package format="3">
-  <name>StateEstimator</name>
+  <name>state_estimator</name>
   <version>0.0.0</version>
   <description>StateEstimator package</description>
 

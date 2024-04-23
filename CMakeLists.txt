@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(StateEstimator)
+project(state_estimator)
 
 add_compile_options(-std=c++17)
 set(CMAKE_BUILD_TYPE "Release")
@@ -21,6 +21,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(a2rl_bs_msgs REQUIRED)
 find_package(vectornav_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 #find_package(cmake_modules REQUIRED)
 # include_directories(include ${catkin_INCLUDE_DIRS})
 # include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
@@ -56,7 +57,9 @@ ament_target_dependencies(${PROJECT_NAME} PUBLIC
     # "PCL" 
     "sensor_msgs" 
     "geometry_msgs"
+    "nav_msgs"
     "vectornav_msgs"
+    "visualization_msgs"
 )
 
 target_sources(${PROJECT_NAME}
@@ -110,8 +113,8 @@ ${sensor_msgs_LIBRARIES}
 ${rclcpp_components_LIBRARIES})
 
 
-add_executable(StateEstimator_exec src/StateEstimatorNode.cpp)
-target_link_libraries(StateEstimator_exec ${LIBS} 
+add_executable(state_estimator_exec src/StateEstimatorNode.cpp)
+target_link_libraries(state_estimator_exec ${LIBS} 
 # ${PCL_LIBRARIES} 
 ${PROJECT_NAME} ${GeographicLib_LIBRARIES} gtsam ${TBB_LIBRARIES} ${Boost_LIBRARY_DIRS})
 
@@ -123,7 +126,7 @@ RUNTIME DESTINATION bin
 )
 
 # ==== Install ====
-install(TARGETS StateEstimator_exec 
+install(TARGETS state_estimator_exec 
 ARCHIVE
 LIBRARY
 RUNTIME
@@ -132,7 +135,7 @@ DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/
 DESTINATION include/${PROJECT_NAME})
 
-install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+# install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 
 ament_export_dependencies(ament_cmake)
 ament_export_dependencies(rclcpp)

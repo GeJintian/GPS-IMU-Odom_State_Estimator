@@ -69,10 +69,17 @@ using symbol_shorthand::G; // GPS pose
 
 
 // macro for getting the time stamp of a ros message
-#define TIME(msg) ( (msg)->header.stamp.toSec() )
+#define TIME(msg) ( static_cast<double>((msg)->header.stamp.sec) + static_cast<double>((msg)->header.stamp.nanosec) * 1e-9 )
 
 namespace StateEstimator
 {
+  builtin_interfaces::msg::Time toBuiltinTime(const rclcpp::Time& rclcpp_time)
+  {
+      builtin_interfaces::msg::Time builtin_time;
+      builtin_time.sec = rclcpp_time.seconds();
+      builtin_time.nanosec = rclcpp_time.nanoseconds();
+      return builtin_time;
+  }
 
   StateEstimatorNode::StateEstimatorNode() :
     Node("StateEstimatorNode"),
@@ -207,36 +214,36 @@ namespace StateEstimator
     Vector biases((Vector(6) << 0, 0, 0, 0, 0, 0).finished());
     optimizedBias_ = imuBias::ConstantBias(biases);
     previousBias_ = imuBias::ConstantBias(biases);
-    imuPredictor_ = boost::make_shared<PreintegratedImuMeasurements>(preintegrationParams_, optimizedBias_);
+    imuPredictor_ = std::make_shared<PreintegratedImuMeasurements>(preintegrationParams_, optimizedBias_);
 
     optimizedTime_ = 0;
 
     //TODO: we need to have a better intialization
-    std::shared_ptr<vectornav_msgs::msg::ImuGroup> ip = nullptr;
-    if (!fixedInitialPose)
+    vectornav_msgs::msg::ImuGroup::SharedPtr ip = nullptr;
+    // if (!fixedInitialPose)
+    // {
+    //   while (!ip)
+    //   {
+    //     RCLCPP_WARN(this->get_logger(),"Waiting for valid initial orientation ...");
+    //     ip = rclcpp::wait_for_message<vectornav_msgs::msg::ImuGroup>("/vectornav/raw/imu", this, std::chrono::seconds(5));
+    //   }
+    //   Rot3 initialRotation = Rot3::Ypr(ip->angularrate.z, ip->angularrate.y, ip->angularrate.x);
+    //   initialPose_.orientation.w = initialRotation.quaternion()[0];
+    //   initialPose_.orientation.x = initialRotation.quaternion()[1];
+    //   initialPose_.orientation.y = initialRotation.quaternion()[2];
+    //   initialPose_.orientation.z = initialRotation.quaternion()[3];
+    //   initialPose_.bias.x = ip->accel.x;
+    //   initialPose_.bias.y = ip->accel.y;
+    //   initialPose_.bias.z = ip->accel.z;
+    // }
+    // else
     {
-      while (!ip)
-      {
-        RCLCPP_WARN(this->get_logger(),"Waiting for valid initial orientation ...");
-        ip = rclcpp::wait_for_message<vectornav_msgs::msg::ImuGroup>("/vectornav/raw/imu", this, std::chrono::seconds(5));
-      }
-      Rot3 initialRotation = Rot3::Ypr(ip->angularrate.z, ip->angularrate.y, ip->angularrate.x);
-      initialPose_.orientation.w = initialRotation.quaternion()[0];
-      initialPose_.orientation.x = initialRotation.quaternion()[1];
-      initialPose_.orientation.y = initialRotation.quaternion()[2];
-      initialPose_.orientation.z = initialRotation.quaternion()[3];
-      initialPose_.bias.x = ip->bias.x;
-      initialPose_.bias.y = ip->bias.y;
-      initialPose_.bias.z = ip->bias.z;
-    }
-    else
-    {
-      ROS_WARN("Using fixed initial orientation");
+      RCLCPP_WARN(this->get_logger(), "Using fixed initial orientation");
       Rot3 initialRotation = Rot3::Ypr(initialYaw, intialPitch, initialRoll);
-      initialPose_.orientation.w = initialRotation.quaternion()[0];
-      initialPose_.orientation.x = initialRotation.quaternion()[1];
-      initialPose_.orientation.y = initialRotation.quaternion()[2];
-      initialPose_.orientation.z = initialRotation.quaternion()[3];
+      initialPose_.orientation.w = initialRotation.toQuaternion().w();
+      initialPose_.orientation.x = initialRotation.toQuaternion().x();
+      initialPose_.orientation.y = initialRotation.toQuaternion().y();
+      initialPose_.orientation.z = initialRotation.toQuaternion().z();
       initialPose_.bias.x = 0;
       initialPose_.bias.y = 0;
       initialPose_.bias.z = 0;
@@ -291,42 +298,42 @@ namespace StateEstimator
     gpsSub_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
             "gps", 300, std::bind(&StateEstimatorNode::GpsCallback, this, std::placeholders::_1));
 
-    imuSub_ = this->create_subscription<sensor_msgs::msg::Imu>(
+    imuSub_ = this->create_subscription<vectornav_msgs::msg::ImuGroup>(
             "imu", 600, std::bind(&StateEstimatorNode::ImuCallback, this, std::placeholders::_1));
 
     odomSub_ = this->create_subscription<nav_msgs::msg::Odometry>(
             "wheel_odom", 300, std::bind(&StateEstimatorNode::WheelOdomCallback, this, std::placeholders::_1));
-
-     boost::thread optimizer(&StateEstimatorNode::GpsHelper,this);
+    RCLCPP_WARN(this->get_logger(), "Before thread");
+    std::thread optimizer(&StateEstimatorNode::GpsHelper,this);
   }
 
   StateEstimatorNode::~StateEstimatorNode()
   {}
 
-  void StateEstimatorNode::GpsCallback(sensor_msgs::NavSatFixConstPtr fix)
+  void StateEstimatorNode::GpsCallback(sensor_msgs::msg::NavSatFix::ConstPtr fix)
   {
     if (!gpsOptQ_.pushNonBlocking(fix))
       RCLCPP_WARN(this->get_logger(), "Dropping a GPS measurement due to full queue!!");
   }
 
-  void StateEstimatorNode::GetAccGyro(sensor_msgs::ImuConstPtr imu, Vector3 &acc, Vector3 &gyro)
+  void StateEstimatorNode::GetAccGyro(vectornav_msgs::msg::ImuGroup::ConstPtr imu, Vector3 &acc, Vector3 &gyro)
   {
     double accx, accy, accz;
-    if (invertx_) accx = -imu->linear_acceleration.x;
-    else accx = imu->linear_acceleration.x;
-    if (inverty_) accy = -imu->linear_acceleration.y;
-    else accy = imu->linear_acceleration.y;
-    if (invertz_) accz = -imu->linear_acceleration.z;
-    else accz = imu->linear_acceleration.z;
+    if (invertx_) accx = -imu->accel.x;
+    else accx = imu->accel.x;
+    if (inverty_) accy = -imu->accel.y;
+    else accy = imu->accel.y;
+    if (invertz_) accz = -imu->accel.z;
+    else accz = imu->accel.z;
     acc = Vector3(accx, accy, accz);
 
     double gx, gy, gz;
-    if (invertx_) gx = -imu->angular_velocity.x;
-    else gx = imu->angular_velocity.x;
-    if (inverty_) gy = -imu->angular_velocity.y;
-    else gy = imu->angular_velocity.y;
-    if (invertz_) gz = -imu->angular_velocity.z;
-    else gz = imu->angular_velocity.z;
+    if (invertx_) gx = -imu->angularrate.x;
+    else gx = imu->angularrate.x;
+    if (inverty_) gy = -imu->angularrate.y;
+    else gy = imu->angularrate.y;
+    if (invertz_) gz = -imu->angularrate.z;
+    else gz = imu->angularrate.z;
 
     gyro = Vector3(gx, gy, gz);
   }
@@ -334,7 +341,9 @@ namespace StateEstimator
 
   void StateEstimatorNode::GpsHelper()
   {
-    RCLCPP::Rate loop_rate(10);
+    RCLCPP_WARN(this->get_logger(), "In thread");
+    rclcpp::Rate loop_rate(10);
+    RCLCPP_WARN(this->get_logger(), "In thread1");
     bool gotFirstFix = false;
     double startTime;
     int odomKey = 1;
@@ -343,23 +352,23 @@ namespace StateEstimator
     imuBias::ConstantBias prevBias;
     Vector3 prevVel = (Vector(3) << 0.0,0.0,0.0).finished();
     Pose3 prevPose;
-    unsigned char status = autorally_msgs::stateEstimatorStatus::OK;
+    //unsigned char status = autorally_msgs::msg::stateEstimatorStatus::OK;
 
 
-    while (RCLCPP::ok())
+    while (rclcpp::ok())
     {
       bool optimize = false;
 
       if (!gotFirstFix)
-      {
-        sensor_msgs::NavSatFixConstPtr fix = gpsOptQ_.popBlocking();
+      {RCLCPP_WARN(this->get_logger(), "In thread2");
+        sensor_msgs::msg::NavSatFix::ConstPtr fix = gpsOptQ_.popBlocking();
         startTime = TIME(fix);
         if(imuOptQ_.size() <= 0) {
-          RCLCPP_WARN_THROTTLE(1, "no IMU messages before first fix, continuing until there is");
+          RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000 /*ms*/, "no IMU messages before first fix, continuing until there is");
           continue;
         }
         // errors out if the IMU and GPS are not close in timestamps
-        double most_recent_imu_time = imuOptQ_.back()->header.stamp.toSec();
+        double most_recent_imu_time = static_cast<double>(imuOptQ_.back()->header.stamp.sec) + static_cast<double>(imuOptQ_.back()->header.stamp.nanosec) * 1e-9;
         if(std::abs(most_recent_imu_time - startTime) > 0.1) {
           RCLCPP_ERROR_STREAM(this->get_logger(), "There is a very large difference in the GPS and IMU timestamps " << most_recent_imu_time - startTime);
           exit(-1);
@@ -471,7 +480,7 @@ namespace StateEstimator
         // add GPS measurements that are not ahead of the imu messages
         while (optimize && gpsOptQ_.size() > 0 && TIME(gpsOptQ_.front()) < (startTime + (imuKey-1)*0.1 + 1e-2))
         {
-          sensor_msgs::NavSatFixConstPtr fix = gpsOptQ_.popBlocking();
+          sensor_msgs::msg::NavSatFix::ConstPtr fix = gpsOptQ_.popBlocking();
           double timeDiff = (TIME(fix) - startTime) / 0.1;
           int key = round(timeDiff);
           if (std::abs(timeDiff - key) < 1e-4)
@@ -491,14 +500,14 @@ namespace StateEstimator
             double dist = std::sqrt( std::pow(expectedState.x() - E, 2) + std::pow(expectedState.y() - N, 2) );
             if (dist < maxGPSError_ || latestGPSKey < imuKey-2)
             {
-              geometry_msgs::PoseWithCovarianceStamped point;
-              point.header.stamp = rclcpp::Clock(RCL_ROS_TIME).now();//TODO: use now or bag time?
+              geometry_msgs::msg::PoseWithCovarianceStamped point;
+              point.header.stamp = toBuiltinTime(rclcpp::Clock(RCL_ROS_TIME).now());//TODO: use now or bag time?
               point.header.frame_id = "odom";
               point.pose.pose.position.x = E;
               point.pose.pose.position.y = N;
               point.pose.covariance[0] = fix->position_covariance[0];
               point.pose.covariance[7] = fix->position_covariance[4];
-              gpsPosPub_.publish(point);
+              gpsPosPub_->publish(point);
 
               SharedDiagonal gpsNoise = noiseModel::Diagonal::Sigmas(Vector3(gpsSigma_, gpsSigma_, 3.0 * gpsSigma_));
               GPSFactor gpsFactor(G(key), Point3(E, N, U), gpsNoise);
@@ -544,49 +553,39 @@ namespace StateEstimator
             prevVel = isam_->calculateEstimate<Vector3>(V(imuKey-1));
             prevBias = isam_->calculateEstimate<imuBias::ConstantBias>(B(imuKey-1));
 
-            // if we haven't added gps data for 2 message (0.2s) then change status
-            if (latestGPSKey + 3 < imuKey)
-            {
-              status = autorally_msgs::stateEstimatorStatus::WARN;
-            }
-            else
-            {
-              status = autorally_msgs::stateEstimatorStatus::OK;
-            }
-
             double curTime = startTime + (imuKey-1) * 0.1;
 
             {
-              boost::mutex::scoped_lock guard(optimizedStateMutex_);
+              std::lock_guard guard(optimizedStateMutex_);
               optimizedState_ = NavState(prevPose, prevVel);
               optimizedBias_ = prevBias;
               optimizedTime_ = curTime;
-              status_ = status;
+              //status_ = status;
             }
 
-            nav_msgs::Odometry poseNew;
-            poseNew.header.stamp = RCLCPP::Time(curTime);//TODO
+            nav_msgs::msg::Odometry poseNew;
+            poseNew.header.stamp = toBuiltinTime(rclcpp::Time(curTime));//TODO
 
-            geometry_msgs::Point ptAcc;
+            geometry_msgs::msg::Point ptAcc;
             ptAcc.x = prevBias.vector()[0];
             ptAcc.y = prevBias.vector()[1];
             ptAcc.z = prevBias.vector()[2];
 
-            geometry_msgs::Point ptGyro;
+            geometry_msgs::msg::Point ptGyro;
             ptGyro.x = prevBias.vector()[3];
             ptGyro.y = prevBias.vector()[4];
             ptGyro.z = prevBias.vector()[5];
 
-            biasAccPub_.publish(ptAcc);
-            biasGyroPub_.publish(ptGyro);
+            biasAccPub_->publish(ptAcc);
+            biasGyroPub_->publish(ptGyro);
           }
           catch(gtsam::IndeterminantLinearSystemException ex)
           {
             RCLCPP_ERROR(this->get_logger(), "Encountered Indeterminant System Error!");
-            status = autorally_msgs::stateEstimatorStatus::ERROR;
+            //status = autorally_msgs::msg::stateEstimatorStatus::ERROR;
             {
-              boost::mutex::scoped_lock guard(optimizedStateMutex_);
-              status_ = status;
+              std::lock_guard guard(optimizedStateMutex_);
+              //status_ = status;
             }
           }
         }
@@ -596,7 +595,7 @@ namespace StateEstimator
   }
 
 
-  void StateEstimatorNode::ImuCallback(sensor_msgs::ImuConstPtr imu)
+  void StateEstimatorNode::ImuCallback(vectornav_msgs::msg::ImuGroup::SharedPtr imu)
   {
     double dt;
     if (lastImuT_ == 0) dt = 0.005;
@@ -618,13 +617,13 @@ namespace StateEstimator
     double optimizedTime;
     NavState optimizedState;
     imuBias::ConstantBias optimizedBias;
-    unsigned char status;
+    //unsigned char status;
     {
-      boost::mutex::scoped_lock guard(optimizedStateMutex_);
+      std::lock_guard guard(optimizedStateMutex_);
       optimizedState = optimizedState_;
       optimizedBias = optimizedBias_;
       optimizedTime = optimizedTime_;
-      status = status_;
+      //status = status_;
     }
     if (optimizedTime == 0) return; // haven't optimized first state yet
 
@@ -666,8 +665,8 @@ namespace StateEstimator
 
     // predict next state given the imu measurements
     NavState currentPose = imuPredictor_->predict(optimizedState, optimizedBias);
-    nav_msgs::Odometry poseNew;
-    poseNew.header.stamp = imu->header.stamp;
+    nav_msgs::msg::Odometry poseNew;
+    poseNew.header.stamp = toBuiltinTime(imu->header.stamp);
 
     Vector4 q = currentPose.quaternion().coeffs();
     poseNew.pose.pose.orientation.x = q[0];
@@ -690,23 +689,23 @@ namespace StateEstimator
     poseNew.child_frame_id = "base_link";
     poseNew.header.frame_id = "odom";
 
-    posePub_.publish(poseNew);
+    posePub_->publish(poseNew);
 
-    geometry_msgs::Point delays;
+    geometry_msgs::msg::Point delays;
     delays.x = TIME(imu);
-    delays.y = (rclcpp::Clock(RCL_ROS_TIME).now(); - imu->header.stamp).toSec();//TODO
+    delays.y = rclcpp::Clock(RCL_ROS_TIME).now().seconds() - (static_cast<double>(imu->header.stamp.sec)+static_cast<double>(imu->header.stamp.nanosec)*1e-9);//TODO
     delays.z = TIME(imu) - optimizedTime;
-    timePub_.publish(delays);
+    timePub_->publish(delays);
 
-    // publish the status of the estimate - set in the gpsHelper thread
-    autorally_msgs::stateEstimatorStatus statusMsgs;
-    statusMsgs.header.stamp = imu->header.stamp;
-    statusMsgs.status = status;
-    statusPub_.publish(statusMsgs);
+    // // publish the status of the estimate - set in the gpsHelper thread
+    // autorally_msgs::msg::stateEstimatorStatus statusMsgs;
+    // statusMsgs.header.stamp = imu->header.stamp;
+    // statusMsgs.status = status;
+    // statusPub_.publish(statusMsgs);
     return;
   }
 
-  void StateEstimatorNode::WheelOdomCallback(nav_msgs::OdometryConstPtr odom)
+  void StateEstimatorNode::WheelOdomCallback(nav_msgs::msg::Odometry::ConstPtr odom)
   {
     if (!odomOptQ_.pushNonBlocking(odom) && usingOdom_) {
       RCLCPP_WARN(this->get_logger(), "Dropping an wheel odometry measurement due to full queue!!");
