@@ -144,6 +144,8 @@ namespace StateEstimator
 
     nav_msgs::msg::Odometry::ConstPtr lastOdom_;
 
+    std::thread optimizer;
+
   public:
     StateEstimatorNode();
     ~StateEstimatorNode();

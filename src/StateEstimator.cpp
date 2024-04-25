@@ -295,20 +295,25 @@ namespace StateEstimator
     sigma_gyro_bias_c << gyroBiasSigma_, gyroBiasSigma_, gyroBiasSigma_;
     noiseModelBetweenBias_sigma_ = (Vector(6) << sigma_acc_bias_c, sigma_gyro_bias_c).finished();
 
-    gpsSub_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
-            "gps", 300, std::bind(&StateEstimatorNode::GpsCallback, this, std::placeholders::_1));
+    gpsSub_ = this->create_subscription<sensor_msgs::msg::NavSatFix>("gps", 300, std::bind(&StateEstimatorNode::GpsCallback, this, std::placeholders::_1));
 
-    imuSub_ = this->create_subscription<vectornav_msgs::msg::ImuGroup>(
-            "imu", 600, std::bind(&StateEstimatorNode::ImuCallback, this, std::placeholders::_1));
+    imuSub_ = this->create_subscription<vectornav_msgs::msg::ImuGroup>("imu", 600, std::bind(&StateEstimatorNode::ImuCallback, this, std::placeholders::_1));
 
-    odomSub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            "wheel_odom", 300, std::bind(&StateEstimatorNode::WheelOdomCallback, this, std::placeholders::_1));
-    RCLCPP_WARN(this->get_logger(), "Before thread");
-    std::thread optimizer(&StateEstimatorNode::GpsHelper,this);
+    odomSub_ = this->create_subscription<nav_msgs::msg::Odometry>("wheel_odom", 300, std::bind(&StateEstimatorNode::WheelOdomCallback, this, std::placeholders::_1));
+    optimizer = std::thread(&StateEstimatorNode::GpsHelper, this);
+    if (optimizer.joinable()) {
+    RCLCPP_WARN(this->get_logger(), "Is optimizer joinable? true");
+    } else {
+        RCLCPP_WARN(this->get_logger(), "Is optimizer joinable? false");
+    }
   }
 
   StateEstimatorNode::~StateEstimatorNode()
-  {}
+  {
+    // if (optimizer.joinable()) {
+    //   optimizer.join();
+    // }
+  }
 
   void StateEstimatorNode::GpsCallback(sensor_msgs::msg::NavSatFix::ConstPtr fix)
   {
@@ -341,9 +346,9 @@ namespace StateEstimator
 
   void StateEstimatorNode::GpsHelper()
   {
-    RCLCPP_WARN(this->get_logger(), "In thread");
+    RCLCPP_WARN(this->get_logger(), "New thread, section 1");
     rclcpp::Rate loop_rate(10);
-    RCLCPP_WARN(this->get_logger(), "In thread1");
+    RCLCPP_WARN(this->get_logger(), "Thread section 2");
     bool gotFirstFix = false;
     double startTime;
     int odomKey = 1;
